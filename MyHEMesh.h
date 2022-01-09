@@ -2,6 +2,11 @@
 #ifndef _MYMESH_H_
 #define _MYMESH_H_
 
+#if __INTELLISENSE__  //solve intellisence error on arm mac.
+#undef __ARM_NEON     //see https://github.com/microsoft/vscode-cpptools/issues/7413
+#undef __ARM_NEON__
+#endif
+
 #include <vector>
 #include <string>
 #include <map>
@@ -13,7 +18,8 @@ struct Face;
 struct Vertex;
 
 struct HEdge {
-    HEdge* pair, *next; //paired HEdge and next HEdge
+    HEdge* pair = nullptr;
+    HEdge* next = nullptr; //paired HEdge and next HEdge
     Vertex* v; //point at v
     Face* f; //left face
 };
@@ -26,39 +32,63 @@ struct Face {
 struct Vertex {
     double x, y, z;
     unsigned char r=255, g=255, b=255;
-
+    Eigen::Matrix4d Q = Eigen::Matrix4d::Zero();
     int index; //works when output
     HEdge* h;
 };
 
-struct VertexPair {
+struct VertexPairKey {
     Vertex* start;
     Vertex* end;
-    VertexPair(Vertex* v1, Vertex* v2) {
+    VertexPairKey(Vertex* v1, Vertex* v2) {
         start = v1;
         end = v2;
     }
-    bool operator< (const VertexPair& other) const {
+    bool operator< (const VertexPairKey& other) const {
         return start == other.start ? end < other.end : start < other.start;
+    }
+};
+
+struct VertexPair {
+    Vertex* v1;
+    Vertex* v2;
+    double cost = INFINITY;
+    Eigen::Vector4d v;
+    bool erased = false;
+    bool operator< (const VertexPair& other) const {
+        return cost < other.cost;
+    }
+    bool operator> (const VertexPair& other) const {
+        return cost > other.cost;
     }
 };
 
 class MyHEMesh {
 private:
     std::vector<HEdge*> HEdgeVec_;
-    std::map<VertexPair, HEdge*> HEdgeMap_;
+    std::map<VertexPairKey, HEdge*> HEdgeMap_;
     std::set<Face*> FaceSet_;
     std::vector<Vertex*> VertexVec_;
     std::set<Vertex*> VertexSet_;
+    std::vector<VertexPair> VPairHeap_;
+    Vertex* InsertrVertex(double x, double y, double z);
+    Face* InsertFace(Vertex* v1, Vertex* v2, Vertex* v3);
+    HEdge* InsertHEdge(Vertex* v1, Vertex* v2);
 
 public:
     void ReadFromOBJ(const std::string& path);
     void SaveToOBJ(const std::string& path);
-    Vertex* InsertrVertex(double x, double y, double z);
-    Face* InsertFace(Vertex* v1, Vertex* v2, Vertex* v3);
-    HEdge* InsertHEdge(Vertex* v1, Vertex* v2);
-    void UpdateQMatrix(Vertex* v);
+    void UpdateQMatrix(Vertex& v);
     void UpdateAllQMatrix();
+    void UpdateVPairCost(VertexPair& vpair);
+    void UpdateAllVPairCost();
+    void MakeVPairHeap();
+    void ReaddVPair(double threshold);
+    void ContractModel(int facenum);
+    void ContractLeastCostPair();
+    void ContractVPair(VertexPair& vpair);
+
+    static Eigen::Vector4d CalcP(Face* f);
 };
 
 #endif
