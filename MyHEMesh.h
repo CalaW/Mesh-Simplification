@@ -16,12 +16,14 @@
 struct HEdge;
 struct Face;
 struct Vertex;
+struct VertexPair;
 
 struct HEdge {
     HEdge* pair = nullptr;
     HEdge* next = nullptr; //paired HEdge and next HEdge
     Vertex* v; //point at v
     Face* f; //left face
+    VertexPair* vpair;
 };
 
 struct Face {
@@ -62,6 +64,11 @@ struct VertexPair {
         return cost > other.cost;
     }
 };
+struct VPairPtrGreater {
+    bool operator() (const VertexPair* v1, const VertexPair* v2) {
+        return v1->cost > v2->cost;
+    }
+};
 
 class MyHEMesh {
 private:
@@ -70,7 +77,7 @@ private:
     std::set<Face*> FaceSet_;
     std::vector<Vertex*> VertexVec_;
     std::set<Vertex*> VertexSet_;
-    std::vector<VertexPair> VPairHeap_;
+    std::vector<VertexPair*> VPairHeap_;
     Vertex* InsertrVertex(double x, double y, double z);
     Face* InsertFace(Vertex* v1, Vertex* v2, Vertex* v3);
     HEdge* InsertHEdge(Vertex* v1, Vertex* v2);
@@ -80,13 +87,14 @@ public:
     void SaveToOBJ(const std::string& path);
     void UpdateQMatrix(Vertex& v);
     void UpdateAllQMatrix();
-    void UpdateVPairCost(VertexPair& vpair);
+    void UpdateVPairCost(VertexPair* vpair);
     void UpdateAllVPairCost();
     void MakeVPairHeap();
     void ReaddVPair(double threshold);
     void ContractModel(int facenum);
     void ContractLeastCostPair();
-    void ContractVPair(VertexPair& vpair);
+    void ContractVPair(VertexPair* vpair);
+    void ContractVPair(int v1, int v2);
 
     static Eigen::Vector4d CalcP(Face* f);
 };

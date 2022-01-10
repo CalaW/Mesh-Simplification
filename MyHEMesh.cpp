@@ -60,10 +60,12 @@ HEdge* MyHEMesh::InsertHEdge(Vertex* v1, Vertex* v2) {
         h->pair = hpair;
         hpair->pair = h;
 
-        VertexPair vpair;
-        vpair.v1 = v1;
-        vpair.v2 = v2;
+        VertexPair* vpair = new VertexPair;
+        vpair->v1 = v1;
+        vpair->v2 = v2;
         VPairHeap_.push_back(vpair);
+        h->vpair = vpair;
+        hpair->vpair = vpair;
     }
     else {
         h = search->second;
@@ -173,27 +175,27 @@ void MyHEMesh::UpdateAllQMatrix() {
     }
 }
 
-void MyHEMesh::UpdateVPairCost(VertexPair& vpair) {
-    Eigen::Matrix4d Qbar = vpair.v1->Q + vpair.v2->Q;
+void MyHEMesh::UpdateVPairCost(VertexPair* vpair) {
+    Eigen::Matrix4d Qbar = vpair->v1->Q + vpair->v2->Q;
     Eigen::Matrix4d A = Qbar;
     A(3,0) = 0; A(3,1) = 0; A(3,2) = 0; A(3,3) = 1;
 
-    vpair.v = A.reverse()(3,Eigen::all);
-    vpair.v(3) = 1;
-    vpair.cost = vpair.v.transpose() * Qbar * vpair.v;
-    std::cout << "update cost of " << vpair.v1->x << ' ' << vpair.v1->y << ' ' << vpair.v1->z << " & "
-        << vpair.v2->x << ' ' << vpair.v2->y << ' ' << vpair.v2->z << '\n';
+    vpair->v = A.reverse()(3,Eigen::all);
+    vpair->v(3) = 1;
+    vpair->cost = vpair->v.transpose() * Qbar * vpair->v;
+    std::cout << "update cost of " << vpair->v1->x << ' ' << vpair->v1->y << ' ' << vpair->v1->z << " & "
+        << vpair->v2->x << ' ' << vpair->v2->y << ' ' << vpair->v2->z << '\n';
     // std::cout << vpair.cost << '\n' << Qbar << '\n' << vpair.v << '\n' << std::endl;
 }
 
 void MyHEMesh::UpdateAllVPairCost() {
-    for (auto &it : VPairHeap_) {
+    for (auto it : VPairHeap_) {
         UpdateVPairCost(it);
     }
 }
 
 void MyHEMesh::MakeVPairHeap() {
-    std::make_heap(VPairHeap_.begin(), VPairHeap_.end(), std::greater<VertexPair>());
+    std::make_heap(VPairHeap_.begin(), VPairHeap_.end(), VPairPtrGreater());
     // for (auto it : VPairHeap_) {
     //     std::cout << it.cost << ' ';
     // }
@@ -203,9 +205,9 @@ void MyHEMesh::MakeVPairHeap() {
 void MyHEMesh::ReaddVPair(double threshold) {
     VPairHeap_.clear();
     for (auto it : HEdgeMap_) {
-        VertexPair vpair;
-        vpair.v1 = it.first.start;
-        vpair.v2 = it.first.end;
+        VertexPair* vpair = new VertexPair;
+        vpair->v1 = it.first.start;
+        vpair->v2 = it.first.end;
         VPairHeap_.push_back(vpair);
     }
     MakeVPairHeap();
@@ -218,18 +220,18 @@ void MyHEMesh::ContractModel(int facenum) {
 }
 
 void MyHEMesh::ContractLeastCostPair() {
-    VertexPair vpair = VPairHeap_.front();
-    std::pop_heap(VPairHeap_.begin(), VPairHeap_.end(), std::greater<VertexPair>());
+    VertexPair* vpair = VPairHeap_.front();
+    std::pop_heap(VPairHeap_.begin(), VPairHeap_.end(), VPairPtrGreater());
     VPairHeap_.pop_back();
-    if (!vpair.erased) ContractVPair(vpair);
+    if (!vpair->erased) ContractVPair(vpair);
 }
 
-void MyHEMesh::ContractVPair(VertexPair& vpair) {
-    std::cout << "Contract pair" << vpair.v1->x << ' ' << vpair.v1->y << ' ' << vpair.v1->z
-                        << " & " << vpair.v2->x << ' ' << vpair.v2->y << ' ' << vpair.v2->z << '\n';
+void MyHEMesh::ContractVPair(VertexPair* vpair) {
+    std::cout << "Contract pair" << vpair->v1->x << ' ' << vpair->v1->y << ' ' << vpair->v1->z
+                        << " & " << vpair->v2->x << ' ' << vpair->v2->y << ' ' << vpair->v2->z << '\n';
 
     Vertex* v = new Vertex;
-    v->x = vpair.v(0); v->y = vpair.v(1); v->z = vpair.v(2);
+    v->x = vpair->v(0); v->y = vpair->v(1); v->z = vpair->v(2);
     v->g = 0;
 
     std::cout << "Target: " << v->x << ' ' << v->y << ' ' << v->z << '\n';
@@ -237,13 +239,17 @@ void MyHEMesh::ContractVPair(VertexPair& vpair) {
     vector<VertexPairKey> NeighbVPKVec;
     vector<Vertex*> NeighbVertexVec;
     vector<Face*> NeighbFaceVec;
-    Vertex* vstart = (vpair.v1->h->pair->v == vpair.v2) ? vpair.v2 : vpair.v1;
-    Vertex* vother = (vpair.v1->h->pair->v == vpair.v2) ? vpair.v1 : vpair.v2;
+    Vertex* vstart = (vpair->v1->h->pair->v == vpair->v2) ? vpair->v2 : vpair->v1;
+    Vertex* vother = (vpair->v1->h->pair->v == vpair->v2) ? vpair->v1 : vpair->v2;
     // HEdge* h = (vpair.v1->h->pair->v == vpair.v2) ? vpair.v2->h : vpair.v1->h;
     HEdge* h = vstart->h;
     do {
+        std::cout << "Traverse edge" << h->v->x << ' ' << h->v->y << ' ' << h->v->z << " to "
+                  << h->pair->v->x << ' ' << h->pair->v->y << ' ' << h->pair->v->z << std::endl;
         if (h->pair->v == vother || h->pair->v == vstart) {
+            if (h->next == vstart->h || h->next == nullptr) break;
             NeighbFaceVec.push_back(h->f);
+            NeighbVPKVec.push_back(VertexPairKey(h->next->v, h->next->pair->v));
             h = h->next->pair->next;
             continue;
         }
@@ -257,8 +263,8 @@ void MyHEMesh::ContractVPair(VertexPair& vpair) {
     } while (h != vstart->h && h != nullptr);
     bool IsEdge = (h == nullptr) ? true : false;
 
-    NeighbVPKVec.push_back(VertexPairKey(vpair.v1, vpair.v2));
-    // NeighbVPKVec.push_back(VertexPairKey(vpair.v2, vpair.v1));
+    NeighbVPKVec.push_back(VertexPairKey(vpair->v1, vpair->v2));
+    if (NeighbVertexVec.front() == NeighbVertexVec.back()) NeighbVertexVec.pop_back();
     for (auto &it : NeighbVPKVec) {
         // auto MapIt = HEdgeMap_.find(it);
         // delete MapIt->second;
@@ -266,10 +272,10 @@ void MyHEMesh::ContractVPair(VertexPair& vpair) {
         HEdgeMap_.erase(it);
         HEdgeMap_.erase(VertexPairKey(it.end, it.start));
     }
-    for (auto &it : VPairHeap_) {
+    for (auto it : VPairHeap_) {
         for (auto &VPKit : NeighbVPKVec) {
-            if ((it.v1 == VPKit.start && it.v2 == VPKit.end) || (it.v1 == VPKit.end && it.v2 == VPKit.start)) {
-                it.erased = true;
+            if ((it->v1 == VPKit.start && it->v2 == VPKit.end) || (it->v1 == VPKit.end && it->v2 == VPKit.start)) {
+                it->erased = true;
             }
         }
     }
@@ -285,7 +291,7 @@ void MyHEMesh::ContractVPair(VertexPair& vpair) {
     if (!IsEdge) {
         InsertFace(v, NeighbVertexVec.front(), NeighbVertexVec.back());
     }
-    VertexSet_.erase(vpair.v1); VertexSet_.erase(vpair.v2);
+    VertexSet_.erase(vpair->v1); VertexSet_.erase(vpair->v2);
     VertexSet_.insert(v);
     // delete vpair.v1; delete vpair.v2;
 
@@ -296,10 +302,96 @@ void MyHEMesh::ContractVPair(VertexPair& vpair) {
 
     for (int i = NeighbVertexVec.size(); i > 0; --i) {
         UpdateVPairCost(*(VPairHeap_.end() - i));
-        std::push_heap(VPairHeap_.begin(), VPairHeap_.end() - i + 1, std::greater<VertexPair>());
-        for (auto it : VPairHeap_) {
-            std::cout << it.cost << ' ';
+        // std::push_heap(VPairHeap_.begin(), VPairHeap_.end() - i + 1, std::greater<VertexPair>());
+        std::push_heap(VPairHeap_.begin(), VPairHeap_.end() - i + 1, VPairPtrGreater());
+        // for (auto it : VPairHeap_) {
+        //     std::cout << it->cost << ' ';
+        // }
+        // std::cout << std::endl;
+    }
+}
+
+void MyHEMesh::ContractVPair(int v1, int v2) {
+    std::cout << "Contract pair" << vpair->v1->x << ' ' << vpair->v1->y << ' ' << vpair->v1->z
+                        << " & " << vpair->v2->x << ' ' << vpair->v2->y << ' ' << vpair->v2->z << '\n';
+
+    Vertex* v = new Vertex;
+    v->x = vpair->v(0); v->y = vpair->v(1); v->z = vpair->v(2);
+    v->g = 0;
+
+    std::cout << "Target: " << v->x << ' ' << v->y << ' ' << v->z << '\n';
+
+    vector<VertexPairKey> NeighbVPKVec;
+    vector<Vertex*> NeighbVertexVec;
+    vector<Face*> NeighbFaceVec;
+    Vertex* vstart = (vpair->v1->h->pair->v == vpair->v2) ? vpair->v2 : vpair->v1;
+    Vertex* vother = (vpair->v1->h->pair->v == vpair->v2) ? vpair->v1 : vpair->v2;
+    // HEdge* h = (vpair.v1->h->pair->v == vpair.v2) ? vpair.v2->h : vpair.v1->h;
+    HEdge* h = vstart->h;
+    do {
+        std::cout << "Traverse edge" << h->v->x << ' ' << h->v->y << ' ' << h->v->z << " to "
+                  << h->pair->v->x << ' ' << h->pair->v->y << ' ' << h->pair->v->z << std::endl;
+        if (h->pair->v == vother || h->pair->v == vstart) {
+            if (h->next == vstart->h || h->next == nullptr) break;
+            NeighbFaceVec.push_back(h->f);
+            NeighbVPKVec.push_back(VertexPairKey(h->next->v, h->next->pair->v));
+            h = h->next->pair->next;
+            continue;
         }
-        std::cout << std::endl;
+        NeighbVPKVec.push_back(VertexPairKey(h->v, h->pair->v));
+        // NeighbVPKVec.push_back(VertexPairKey(h->pair->v, h->v));
+        NeighbVertexVec.push_back(h->pair->v);
+        NeighbFaceVec.push_back(h->f);
+        h = h->pair->next;
+        // h = (h.v == vpair.v2 && h->pair->v == vpair.v1) || (h.v == vpair.v1 && h->pair->v == vpair.v2)
+        //     ? h->next->pair : h->pair->next;
+    } while (h != vstart->h && h != nullptr);
+    bool IsEdge = (h == nullptr) ? true : false;
+
+    NeighbVPKVec.push_back(VertexPairKey(vpair->v1, vpair->v2));
+    if (NeighbVertexVec.front() == NeighbVertexVec.back()) NeighbVertexVec.pop_back();
+    for (auto &it : NeighbVPKVec) {
+        // auto MapIt = HEdgeMap_.find(it);
+        // delete MapIt->second;
+        // HEdgeMap_.erase(MapIt);
+        HEdgeMap_.erase(it);
+        HEdgeMap_.erase(VertexPairKey(it.end, it.start));
+    }
+    for (auto it : VPairHeap_) {
+        for (auto &VPKit : NeighbVPKVec) {
+            if ((it->v1 == VPKit.start && it->v2 == VPKit.end) || (it->v1 == VPKit.end && it->v2 == VPKit.start)) {
+                it->erased = true;
+            }
+        }
+    }
+
+    for (auto it : NeighbFaceVec) {
+        // delete it;
+        FaceSet_.erase(it);
+    }
+
+    for (auto it = NeighbVertexVec.begin() + 1; it != NeighbVertexVec.end(); ++it) {
+        InsertFace(v, *it, *(it - 1));
+    }
+    if (!IsEdge) {
+        InsertFace(v, NeighbVertexVec.front(), NeighbVertexVec.back());
+    }
+    VertexSet_.erase(vpair->v1); VertexSet_.erase(vpair->v2);
+    VertexSet_.insert(v);
+    // delete vpair.v1; delete vpair.v2;
+
+    for (auto it : NeighbVertexVec) {
+        UpdateQMatrix(*it);
+    }
+    UpdateQMatrix(*v);
+
+    for (int i = NeighbVertexVec.size(); i > 0; --i) {
+        UpdateVPairCost(*(VPairHeap_.end() - i));
+        // std::push_heap(VPairHeap_.begin(), VPairHeap_.end() - i + 1, std::greater<VertexPair>());
+        std::push_heap(VPairHeap_.begin(), VPairHeap_.end() - i + 1, VPairPtrGreater());
+        // for (auto it : VPairHeap_) {
+        //     std::cout << it->cost << ' ';
+        // }
+        // std::cout << std::endl;
     }
 }
