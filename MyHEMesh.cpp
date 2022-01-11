@@ -13,6 +13,15 @@
 using std::vector;
 using std::string;
 using std::to_string;
+using Eigen::Vector3d;
+using Eigen::Vector4d;
+using Eigen::Matrix4d;
+using Eigen::seq;
+using Eigen::fix;
+
+Vector3d GetPosVec(const Vertex* v) {
+    return Vector3d(v->x, v->y, v->z);
+}
 
 Vertex* MyHEMesh::InsertrVertex(double x, double y, double z) {
     Vertex* v = new Vertex;
@@ -142,25 +151,25 @@ void MyHEMesh::SaveToOBJ(const string& path) {
 }
 
 Eigen::Vector4d MyHEMesh::CalcP(Face* f) {
-    Eigen::Vector3d vec12(f->v[1]->x - f->v[0]->x, f->v[1]->y - f->v[0]->y, f->v[1]->z - f->v[0]->z);
-    Eigen::Vector3d vec23(f->v[2]->x - f->v[1]->x, f->v[2]->y - f->v[1]->y, f->v[2]->z - f->v[1]->z);
+    Vector3d vec12(f->v[1]->x - f->v[0]->x, f->v[1]->y - f->v[0]->y, f->v[1]->z - f->v[0]->z);
+    Vector3d vec23(f->v[2]->x - f->v[1]->x, f->v[2]->y - f->v[1]->y, f->v[2]->z - f->v[1]->z);
 
-    Eigen::Vector3d veccross = vec12.cross(vec23);
+    Vector3d veccross = vec12.cross(vec23);
     veccross.normalize();
 
-    Eigen::Vector4d faceEqn;
+    Vector4d faceEqn;
     faceEqn << veccross, -veccross[0]*f->v[0]->x -veccross[1]*f->v[0]->y -veccross[2]*f->v[0]->z;
 
     return faceEqn;
 }
 
 void MyHEMesh::UpdateQMatrix(Vertex& v) {
-    v.Q = Eigen::Matrix4d::Zero();
+    v.Q = Matrix4d::Zero();
     HEdge* h = v.h;
-    std::cout << "Update QMatrix of "<< v.x << v.y << v.z << '\n';
+    // std::cout << "Update QMatrix of "<< v.x << v.y << v.z << '\n';
     do {
         Face* f = h->f;
-        Eigen::Vector4d p;
+        Vector4d p;
         p = CalcP(f);
         // std::cout << p.transpose() << '\n';
         v.Q += p * p.transpose();
@@ -176,15 +185,21 @@ void MyHEMesh::UpdateAllQMatrix() {
 }
 
 void MyHEMesh::UpdateVPairCost(VertexPair* vpair) {
-    Eigen::Matrix4d Qbar = vpair->v1->Q + vpair->v2->Q;
-    Eigen::Matrix4d A = Qbar;
+    Matrix4d Qbar = vpair->v1->Q + vpair->v2->Q;
+    Matrix4d A = Qbar;
     A(3,0) = 0; A(3,1) = 0; A(3,2) = 0; A(3,3) = 1;
 
-    vpair->v = A.reverse()(3,Eigen::all);
+    vpair->v = A.colPivHouseholderQr().solve(Vector4d(0, 0, 0, 1));
     vpair->v(3) = 1;
     vpair->cost = vpair->v.transpose() * Qbar * vpair->v;
-    std::cout << "update cost of " << vpair->v1->x << ' ' << vpair->v1->y << ' ' << vpair->v1->z << " & "
-        << vpair->v2->x << ' ' << vpair->v2->y << ' ' << vpair->v2->z << '\n';
+    if (abs((A*vpair->v - Vector4d(0,0,0,1)).norm()) > 1e-10) {
+        // std::cout << (A*vpair->v - Vector4d(0,0,0,1)).norm();
+        vpair->v(0) = (vpair->v1->x + vpair->v2->x) / 2;
+        vpair->v(1) = (vpair->v1->y + vpair->v2->y) / 2;
+        vpair->v(2) = (vpair->v1->z + vpair->v2->z) / 2;
+    }
+    // std::cout << "update cost of " << vpair->v1->x << ' ' << vpair->v1->y << ' ' << vpair->v1->z << " & "
+    //     << vpair->v2->x << ' ' << vpair->v2->y << ' ' << vpair->v2->z << '\n';
     // std::cout << vpair.cost << '\n' << Qbar << '\n' << vpair.v << '\n' << std::endl;
 }
 
@@ -215,26 +230,32 @@ void MyHEMesh::ReaddVPair(double threshold) {
 
 void MyHEMesh::ContractModel(int facenum) {
     while (FaceSet_.size() > facenum) {
+        std::cout << FaceSet_.size() << '\n';
         ContractLeastCostPair();
+        if (FaceSet_.size() < 170) SaveToOBJ("teapot-tst-" + to_string(FaceSet_.size()) + ".obj");
     }
 }
 
 void MyHEMesh::ContractLeastCostPair() {
-    VertexPair* vpair = VPairHeap_.front();
+    VertexPair vpair = *VPairHeap_.front();
+    // for (auto it = VPairHeap_.begin(); it < VPairHeap_.begin() + 10; it ++) {
+    //     std::cout << (*it)->cost << ' ';
+    // }
+    // std::cout << std::endl;
     std::pop_heap(VPairHeap_.begin(), VPairHeap_.end(), VPairPtrGreater());
     VPairHeap_.pop_back();
-    if (!vpair->erased) ContractVPair(vpair);
+    if (!vpair.erased) ContractVPair(&vpair);
 }
 
 void MyHEMesh::ContractVPair(VertexPair* vpair) {
-    std::cout << "Contract pair" << vpair->v1->x << ' ' << vpair->v1->y << ' ' << vpair->v1->z
-                        << " & " << vpair->v2->x << ' ' << vpair->v2->y << ' ' << vpair->v2->z << '\n';
+    // std::cout << "Contract pair" << vpair->v1->x << ' ' << vpair->v1->y << ' ' << vpair->v1->z
+    //                     << " & " << vpair->v2->x << ' ' << vpair->v2->y << ' ' << vpair->v2->z << '\n';
 
     Vertex* v = new Vertex;
     v->x = vpair->v(0); v->y = vpair->v(1); v->z = vpair->v(2);
     v->g = 0;
 
-    std::cout << "Target: " << v->x << ' ' << v->y << ' ' << v->z << '\n';
+    // std::cout << "Target: " << v->x << ' ' << v->y << ' ' << v->z << '\n';
 
     vector<VertexPairKey> NeighbVPKVec;
     vector<Vertex*> NeighbVertexVec;
@@ -244,10 +265,11 @@ void MyHEMesh::ContractVPair(VertexPair* vpair) {
     // HEdge* h = (vpair.v1->h->pair->v == vpair.v2) ? vpair.v2->h : vpair.v1->h;
     HEdge* h = vstart->h;
     do {
-        std::cout << "Traverse edge" << h->v->x << ' ' << h->v->y << ' ' << h->v->z << " to "
-                  << h->pair->v->x << ' ' << h->pair->v->y << ' ' << h->pair->v->z << std::endl;
+        // std::cout << "Traverse edge" << h->v->x << ' ' << h->v->y << ' ' << h->v->z << " to "
+        //           << h->pair->v->x << ' ' << h->pair->v->y << ' ' << h->pair->v->z << std::endl;
         if (h->pair->v == vother || h->pair->v == vstart) {
-            if (h->next == vstart->h || h->next == nullptr) break;
+            // if (h->next == vstart->h || h->next == nullptr) break;
+            if (h->next == vstart->h) break;
             NeighbFaceVec.push_back(h->f);
             NeighbVPKVec.push_back(VertexPairKey(h->next->v, h->next->pair->v));
             h = h->next->pair->next;
@@ -260,8 +282,15 @@ void MyHEMesh::ContractVPair(VertexPair* vpair) {
         h = h->pair->next;
         // h = (h.v == vpair.v2 && h->pair->v == vpair.v1) || (h.v == vpair.v1 && h->pair->v == vpair.v2)
         //     ? h->next->pair : h->pair->next;
-    } while (h != vstart->h && h != nullptr);
-    bool IsEdge = (h == nullptr) ? true : false;
+    } while (h != vstart->h);
+    // } while (h != vstart->h && h != nullptr);
+    // bool IsEdge = (h == nullptr) ? true : false;
+    bool IsEdge = false;
+
+    if (HasFoldFace(vpair, NeighbFaceVec)) {
+        // std::cout << "find folded" << std::endl;
+        return;
+    }
 
     NeighbVPKVec.push_back(VertexPairKey(vpair->v1, vpair->v2));
     if (NeighbVertexVec.front() == NeighbVertexVec.back()) NeighbVertexVec.pop_back();
@@ -311,87 +340,31 @@ void MyHEMesh::ContractVPair(VertexPair* vpair) {
     }
 }
 
-void MyHEMesh::ContractVPair(int v1, int v2) {
-    std::cout << "Contract pair" << vpair->v1->x << ' ' << vpair->v1->y << ' ' << vpair->v1->z
-                        << " & " << vpair->v2->x << ' ' << vpair->v2->y << ' ' << vpair->v2->z << '\n';
-
-    Vertex* v = new Vertex;
-    v->x = vpair->v(0); v->y = vpair->v(1); v->z = vpair->v(2);
-    v->g = 0;
-
-    std::cout << "Target: " << v->x << ' ' << v->y << ' ' << v->z << '\n';
-
-    vector<VertexPairKey> NeighbVPKVec;
-    vector<Vertex*> NeighbVertexVec;
-    vector<Face*> NeighbFaceVec;
-    Vertex* vstart = (vpair->v1->h->pair->v == vpair->v2) ? vpair->v2 : vpair->v1;
-    Vertex* vother = (vpair->v1->h->pair->v == vpair->v2) ? vpair->v1 : vpair->v2;
-    // HEdge* h = (vpair.v1->h->pair->v == vpair.v2) ? vpair.v2->h : vpair.v1->h;
-    HEdge* h = vstart->h;
-    do {
-        std::cout << "Traverse edge" << h->v->x << ' ' << h->v->y << ' ' << h->v->z << " to "
-                  << h->pair->v->x << ' ' << h->pair->v->y << ' ' << h->pair->v->z << std::endl;
-        if (h->pair->v == vother || h->pair->v == vstart) {
-            if (h->next == vstart->h || h->next == nullptr) break;
-            NeighbFaceVec.push_back(h->f);
-            NeighbVPKVec.push_back(VertexPairKey(h->next->v, h->next->pair->v));
-            h = h->next->pair->next;
-            continue;
-        }
-        NeighbVPKVec.push_back(VertexPairKey(h->v, h->pair->v));
-        // NeighbVPKVec.push_back(VertexPairKey(h->pair->v, h->v));
-        NeighbVertexVec.push_back(h->pair->v);
-        NeighbFaceVec.push_back(h->f);
-        h = h->pair->next;
-        // h = (h.v == vpair.v2 && h->pair->v == vpair.v1) || (h.v == vpair.v1 && h->pair->v == vpair.v2)
-        //     ? h->next->pair : h->pair->next;
-    } while (h != vstart->h && h != nullptr);
-    bool IsEdge = (h == nullptr) ? true : false;
-
-    NeighbVPKVec.push_back(VertexPairKey(vpair->v1, vpair->v2));
-    if (NeighbVertexVec.front() == NeighbVertexVec.back()) NeighbVertexVec.pop_back();
-    for (auto &it : NeighbVPKVec) {
-        // auto MapIt = HEdgeMap_.find(it);
-        // delete MapIt->second;
-        // HEdgeMap_.erase(MapIt);
-        HEdgeMap_.erase(it);
-        HEdgeMap_.erase(VertexPairKey(it.end, it.start));
-    }
-    for (auto it : VPairHeap_) {
-        for (auto &VPKit : NeighbVPKVec) {
-            if ((it->v1 == VPKit.start && it->v2 == VPKit.end) || (it->v1 == VPKit.end && it->v2 == VPKit.start)) {
-                it->erased = true;
+bool MyHEMesh::HasFoldFace(VertexPair* vpair, std::vector<Face*> NeighbFaceVec) {
+    Vector3d newPos = vpair->v(seq(fix<0>, fix<2>));
+    for (Face* fptr : NeighbFaceVec) {
+        if (fptr->v[0] == vpair->v1 || fptr->v[0] == vpair->v2) {
+            Vertex* vStart = (fptr->v[0] == vpair->v1) ? vpair->v1 : vpair->v2;
+            Vector3d OriFaceNorm = (GetPosVec(vStart) - GetPosVec(fptr->v[1])).cross(GetPosVec(vStart) - GetPosVec(fptr->v[2]));
+            Vector3d NewFaceNorm = (newPos - GetPosVec(fptr->v[1])).cross(newPos - GetPosVec(fptr->v[2]));
+            if (OriFaceNorm.dot(NewFaceNorm) < 0) {
+                return true;
+            }
+        } else if (fptr->v[1] == vpair->v1 || fptr->v[1] == vpair->v2) {
+            Vertex* vStart = (fptr->v[1] == vpair->v1) ? vpair->v1 : vpair->v2;
+            Vector3d OriFaceNorm = (GetPosVec(vStart) - GetPosVec(fptr->v[0])).cross(GetPosVec(vStart) - GetPosVec(fptr->v[2]));
+            Vector3d NewFaceNorm = (newPos - GetPosVec(fptr->v[0])).cross(newPos - GetPosVec(fptr->v[2]));
+            if (OriFaceNorm.dot(NewFaceNorm) < 0) {
+                return true;
+            }
+        } else if (fptr->v[2] == vpair->v1 || fptr->v[2] == vpair->v2) {
+            Vertex* vStart = (fptr->v[2] == vpair->v1) ? vpair->v1 : vpair->v2;
+            Vector3d OriFaceNorm = (GetPosVec(vStart) - GetPosVec(fptr->v[0])).cross(GetPosVec(vStart) - GetPosVec(fptr->v[1]));
+            Vector3d NewFaceNorm = (newPos - GetPosVec(fptr->v[0])).cross(newPos - GetPosVec(fptr->v[1]));
+            if (OriFaceNorm.dot(NewFaceNorm) < 0) {
+                return true;
             }
         }
     }
-
-    for (auto it : NeighbFaceVec) {
-        // delete it;
-        FaceSet_.erase(it);
-    }
-
-    for (auto it = NeighbVertexVec.begin() + 1; it != NeighbVertexVec.end(); ++it) {
-        InsertFace(v, *it, *(it - 1));
-    }
-    if (!IsEdge) {
-        InsertFace(v, NeighbVertexVec.front(), NeighbVertexVec.back());
-    }
-    VertexSet_.erase(vpair->v1); VertexSet_.erase(vpair->v2);
-    VertexSet_.insert(v);
-    // delete vpair.v1; delete vpair.v2;
-
-    for (auto it : NeighbVertexVec) {
-        UpdateQMatrix(*it);
-    }
-    UpdateQMatrix(*v);
-
-    for (int i = NeighbVertexVec.size(); i > 0; --i) {
-        UpdateVPairCost(*(VPairHeap_.end() - i));
-        // std::push_heap(VPairHeap_.begin(), VPairHeap_.end() - i + 1, std::greater<VertexPair>());
-        std::push_heap(VPairHeap_.begin(), VPairHeap_.end() - i + 1, VPairPtrGreater());
-        // for (auto it : VPairHeap_) {
-        //     std::cout << it->cost << ' ';
-        // }
-        // std::cout << std::endl;
-    }
+    return false;
 }

@@ -39,6 +39,8 @@ struct Vertex {
     HEdge* h;
 };
 
+inline Eigen::Vector3d GetPosVec(const Vertex* v);
+
 struct VertexPairKey {
     Vertex* start;
     Vertex* end;
@@ -81,6 +83,7 @@ private:
     Vertex* InsertrVertex(double x, double y, double z);
     Face* InsertFace(Vertex* v1, Vertex* v2, Vertex* v3);
     HEdge* InsertHEdge(Vertex* v1, Vertex* v2);
+    bool HasFoldFace(VertexPair* vpair, std::vector<Face*> NeighbFaceVec);
 
 public:
     void ReadFromOBJ(const std::string& path);
@@ -94,7 +97,6 @@ public:
     void ContractModel(int facenum);
     void ContractLeastCostPair();
     void ContractVPair(VertexPair* vpair);
-    void ContractVPair(int v1, int v2);
 
     static Eigen::Vector4d CalcP(Face* f);
 };
