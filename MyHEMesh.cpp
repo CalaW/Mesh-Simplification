@@ -1,4 +1,4 @@
-#if __INTELLISENSE__  //solve intellisence error on arm mac.
+#if __longELLISENSE__  //solve longellisence error on arm mac.
 #undef __ARM_NEON     //see https://github.com/microsoft/vscode-cpptools/issues/7413
 #undef __ARM_NEON__
 #endif
@@ -88,7 +88,7 @@ void MyHEMesh::ReadFromOBJ(const string& path) {
     if (!obj_file.is_open()) {
         throw std::invalid_argument("Cannot open file \"" + path + "\"");
     }
-    int line_num = 0;
+    long line_num = 0;
     while (obj_file.peek() != EOF) {
         char flag;
         string temp_str;
@@ -113,7 +113,7 @@ void MyHEMesh::ReadFromOBJ(const string& path) {
                 }
                 break;
             case 'f':
-                int v1, v2, v3;
+                long v1, v2, v3;
                 obj_file >> v1 >> v2 >> v3;
                 InsertFace(VertexVec_[v1-1], VertexVec_[v2-1], VertexVec_[v3-1]);
                 break;
@@ -132,7 +132,7 @@ void MyHEMesh::SaveToOBJ(const string& path) {
         throw std::invalid_argument("Cannot create file \"" + path + "\"");
     }
     obj_file << "# " << VertexSet_.size() << " vertices\n";
-    int vertex_cnt = 0;
+    long vertex_cnt = 0;
     for (auto it : VertexSet_) {
         vertex_cnt++; it->index = vertex_cnt;
         obj_file << "v " << it->x << ' ' << it->y << ' ' << it->z;
@@ -150,7 +150,7 @@ void MyHEMesh::SaveToOBJ(const string& path) {
     obj_file << std::endl;
 }
 
-Eigen::Vector4d MyHEMesh::CalcP(Face* f) {
+Eigen::Vector4d MyHEMesh::CalcP(const Face* f) {
     Vector3d vec12(f->v[1]->x - f->v[0]->x, f->v[1]->y - f->v[0]->y, f->v[1]->z - f->v[0]->z);
     Vector3d vec23(f->v[2]->x - f->v[1]->x, f->v[2]->y - f->v[1]->y, f->v[2]->z - f->v[1]->z);
 
@@ -190,14 +190,14 @@ void MyHEMesh::UpdateVPairCost(VertexPair* vpair) {
     A(3,0) = 0; A(3,1) = 0; A(3,2) = 0; A(3,3) = 1;
 
     vpair->v = A.colPivHouseholderQr().solve(Vector4d(0, 0, 0, 1));
-    vpair->v(3) = 1;
-    vpair->cost = vpair->v.transpose() * Qbar * vpair->v;
+    // std::cout << vpair->v.transpose() << std::endl;
     if (abs((A*vpair->v - Vector4d(0,0,0,1)).norm()) > 1e-10) {
         // std::cout << (A*vpair->v - Vector4d(0,0,0,1)).norm();
         vpair->v(0) = (vpair->v1->x + vpair->v2->x) / 2;
         vpair->v(1) = (vpair->v1->y + vpair->v2->y) / 2;
         vpair->v(2) = (vpair->v1->z + vpair->v2->z) / 2;
     }
+    vpair->cost = vpair->v.transpose() * Qbar * vpair->v;
     // std::cout << "update cost of " << vpair->v1->x << ' ' << vpair->v1->y << ' ' << vpair->v1->z << " & "
     //     << vpair->v2->x << ' ' << vpair->v2->y << ' ' << vpair->v2->z << '\n';
     // std::cout << vpair.cost << '\n' << Qbar << '\n' << vpair.v << '\n' << std::endl;
@@ -228,11 +228,14 @@ void MyHEMesh::ReaddVPair(double threshold) {
     MakeVPairHeap();
 }
 
-void MyHEMesh::ContractModel(int facenum) {
-    while (FaceSet_.size() > facenum) {
-        std::cout << FaceSet_.size() << '\n';
+void MyHEMesh::ContractModel(long facenum) {
+    long PrevFaceSize = 0;
+    while (FaceSet_.size() > facenum && VPairHeap_.size() > 0) {
+        if (FaceSet_.size() % 100 == 0 && FaceSet_.size() != PrevFaceSize) {
+            std::cout << FaceSet_.size() << ' ' << VPairHeap_.size() << '\n';
+            PrevFaceSize = FaceSet_.size();
+        }
         ContractLeastCostPair();
-        if (FaceSet_.size() < 170) SaveToOBJ("teapot-tst-" + to_string(FaceSet_.size()) + ".obj");
     }
 }
 
@@ -253,7 +256,7 @@ void MyHEMesh::ContractVPair(VertexPair* vpair) {
 
     Vertex* v = new Vertex;
     v->x = vpair->v(0); v->y = vpair->v(1); v->z = vpair->v(2);
-    v->g = 0;
+    // v->g = 0;
 
     // std::cout << "Target: " << v->x << ' ' << v->y << ' ' << v->z << '\n';
 
@@ -286,6 +289,11 @@ void MyHEMesh::ContractVPair(VertexPair* vpair) {
     // } while (h != vstart->h && h != nullptr);
     // bool IsEdge = (h == nullptr) ? true : false;
     bool IsEdge = false;
+
+    if (!IsCollapseable(NeighbVertexVec, vpair->v1, vpair->v2)) {
+        // std::cout << "find non-manifold" << std::endl;
+        return;
+    }
 
     if (HasFoldFace(vpair, NeighbFaceVec)) {
         // std::cout << "find folded" << std::endl;
@@ -329,7 +337,7 @@ void MyHEMesh::ContractVPair(VertexPair* vpair) {
     }
     UpdateQMatrix(*v);
 
-    for (int i = NeighbVertexVec.size(); i > 0; --i) {
+    for (long i = NeighbVertexVec.size(); i > 0; --i) {
         UpdateVPairCost(*(VPairHeap_.end() - i));
         // std::push_heap(VPairHeap_.begin(), VPairHeap_.end() - i + 1, std::greater<VertexPair>());
         std::push_heap(VPairHeap_.begin(), VPairHeap_.end() - i + 1, VPairPtrGreater());
@@ -340,31 +348,63 @@ void MyHEMesh::ContractVPair(VertexPair* vpair) {
     }
 }
 
-bool MyHEMesh::HasFoldFace(VertexPair* vpair, std::vector<Face*> NeighbFaceVec) {
+Vector3d GetNormalVec(Face* f) {
+    return (GetPosVec(f->v[2]) - GetPosVec(f->v[1])).cross(GetPosVec(f->v[1]) - GetPosVec(f->v[0]));
+}
+bool MyHEMesh::HasFoldFace(const VertexPair* vpair, const std::vector<Face*>& NeighbFaceVec) {
     Vector3d newPos = vpair->v(seq(fix<0>, fix<2>));
-    for (Face* fptr : NeighbFaceVec) {
+    for (auto it = NeighbFaceVec.begin(); it != NeighbFaceVec.end(); ++it) {
+        Face* fptr = *it;
+        Vector3d OriFaceNorm, NewFaceNorm;
+        Vertex* vStart;
+        char ind1, ind2;
         if (fptr->v[0] == vpair->v1 || fptr->v[0] == vpair->v2) {
-            Vertex* vStart = (fptr->v[0] == vpair->v1) ? vpair->v1 : vpair->v2;
-            Vector3d OriFaceNorm = (GetPosVec(vStart) - GetPosVec(fptr->v[1])).cross(GetPosVec(vStart) - GetPosVec(fptr->v[2]));
-            Vector3d NewFaceNorm = (newPos - GetPosVec(fptr->v[1])).cross(newPos - GetPosVec(fptr->v[2]));
-            if (OriFaceNorm.dot(NewFaceNorm) < 0) {
-                return true;
-            }
+            vStart = (fptr->v[0] == vpair->v1) ? vpair->v1 : vpair->v2;
+            ind1 = 1; ind2 = 2;
         } else if (fptr->v[1] == vpair->v1 || fptr->v[1] == vpair->v2) {
-            Vertex* vStart = (fptr->v[1] == vpair->v1) ? vpair->v1 : vpair->v2;
-            Vector3d OriFaceNorm = (GetPosVec(vStart) - GetPosVec(fptr->v[0])).cross(GetPosVec(vStart) - GetPosVec(fptr->v[2]));
-            Vector3d NewFaceNorm = (newPos - GetPosVec(fptr->v[0])).cross(newPos - GetPosVec(fptr->v[2]));
-            if (OriFaceNorm.dot(NewFaceNorm) < 0) {
-                return true;
-            }
+            vStart = (fptr->v[1] == vpair->v1) ? vpair->v1 : vpair->v2;
+            ind1 = 0; ind2 = 2;
         } else if (fptr->v[2] == vpair->v1 || fptr->v[2] == vpair->v2) {
-            Vertex* vStart = (fptr->v[2] == vpair->v1) ? vpair->v1 : vpair->v2;
-            Vector3d OriFaceNorm = (GetPosVec(vStart) - GetPosVec(fptr->v[0])).cross(GetPosVec(vStart) - GetPosVec(fptr->v[1]));
-            Vector3d NewFaceNorm = (newPos - GetPosVec(fptr->v[0])).cross(newPos - GetPosVec(fptr->v[1]));
-            if (OriFaceNorm.dot(NewFaceNorm) < 0) {
-                return true;
-            }
+            vStart = (fptr->v[2] == vpair->v1) ? vpair->v1 : vpair->v2;
+            ind1 = 0; ind2 = 1;
+        }
+        OriFaceNorm = (GetPosVec(vStart) - GetPosVec(fptr->v[ind1])).cross(GetPosVec(vStart) - GetPosVec(fptr->v[ind2]));
+        NewFaceNorm = (newPos - GetPosVec(fptr->v[ind1])).cross(newPos - GetPosVec(fptr->v[ind2]));
+        if (OriFaceNorm.dot(NewFaceNorm) < 0) {
+            return true;
         }
     }
     return false;
+}
+
+bool MyHEMesh::IsCollapseable(const std::vector<Vertex*>& NeighbVertexVec, const Vertex* v1, const Vertex* v2) {
+    for (auto &v : NeighbVertexVec) {
+        HEdge* v1v = nullptr;
+        HEdge* v2v = nullptr;
+        HEdge* v1v2 = nullptr;
+        HEdge* h = v->h;
+        do {
+            if (h->pair->v == v1) v1v = h->pair;
+            if (h->pair->v == v2) v2v = h->pair;
+            h = h->pair->next;
+        } while (h != v->h);
+        if (v1v != nullptr && v2v != nullptr) {
+            h = v1->h;
+            do {
+                if (h->pair->v == v2) {
+                    v1v2 = h;
+                    break;
+                }
+                h = h->pair->next;
+            } while (h != v->h);
+            if (v1v2->next->pair->v != v && v1v2->pair->next->pair->v != v) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void MyHEMesh::ContractInitModel(long v1index, long v2index) {
+
 }

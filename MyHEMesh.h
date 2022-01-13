@@ -36,7 +36,7 @@ struct Vertex {
     unsigned char r=255, g=255, b=255;
     Eigen::Matrix4d Q = Eigen::Matrix4d::Zero();
     int index; //works when output
-    HEdge* h;
+    HEdge* h = nullptr;
 };
 
 inline Eigen::Vector3d GetPosVec(const Vertex* v);
@@ -83,7 +83,8 @@ private:
     Vertex* InsertrVertex(double x, double y, double z);
     Face* InsertFace(Vertex* v1, Vertex* v2, Vertex* v3);
     HEdge* InsertHEdge(Vertex* v1, Vertex* v2);
-    bool HasFoldFace(VertexPair* vpair, std::vector<Face*> NeighbFaceVec);
+    bool HasFoldFace(const VertexPair* vpair, const std::vector<Face*>& NeighbFaceVec);
+    bool IsCollapseable(const std::vector<Vertex*>& VertexVec, const Vertex* v1, const Vertex* v2);
 
 public:
     void ReadFromOBJ(const std::string& path);
@@ -94,11 +95,12 @@ public:
     void UpdateAllVPairCost();
     void MakeVPairHeap();
     void ReaddVPair(double threshold);
-    void ContractModel(int facenum);
+    void ContractModel(long facenum);
     void ContractLeastCostPair();
     void ContractVPair(VertexPair* vpair);
+    void ContractInitModel(long v1index, long v2index);
 
-    static Eigen::Vector4d CalcP(Face* f);
+    static Eigen::Vector4d CalcP(const Face* f);
 };
 
 #endif
