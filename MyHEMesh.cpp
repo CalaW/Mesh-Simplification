@@ -231,10 +231,11 @@ void MyHEMesh::ReaddVPair(double threshold) {
 void MyHEMesh::ContractModel(long facenum) {
     long PrevFaceSize = 0;
     while (FaceSet_.size() > facenum && VPairHeap_.size() > 0) {
-        if (FaceSet_.size() % 100 == 0 && FaceSet_.size() != PrevFaceSize) {
+        if (FaceSet_.size() % 500 == 0 && FaceSet_.size() != PrevFaceSize) {
             std::cout << FaceSet_.size() << ' ' << VPairHeap_.size() << '\n';
             PrevFaceSize = FaceSet_.size();
         }
+        if (FaceSet_.size() == 109588) SaveToOBJ("galera-debug.obj");
         ContractLeastCostPair();
     }
 }
@@ -247,7 +248,10 @@ void MyHEMesh::ContractLeastCostPair() {
     // std::cout << std::endl;
     std::pop_heap(VPairHeap_.begin(), VPairHeap_.end(), VPairPtrGreater());
     VPairHeap_.pop_back();
-    if (!vpair.erased) ContractVPair(&vpair);
+    // if (!vpair.erased) ContractVPair(&vpair);
+    if (DelVPairSet_.find(VertexPairKey(vpair.v1, vpair.v2)) == DelVPairSet_.end()
+        && DelVPairSet_.find(VertexPairKey(vpair.v2, vpair.v1)) == DelVPairSet_.end())
+    ContractVPair(&vpair);
 }
 
 void MyHEMesh::ContractVPair(VertexPair* vpair) {
@@ -303,23 +307,29 @@ void MyHEMesh::ContractVPair(VertexPair* vpair) {
     NeighbVPKVec.push_back(VertexPairKey(vpair->v1, vpair->v2));
     if (NeighbVertexVec.front() == NeighbVertexVec.back()) NeighbVertexVec.pop_back();
     for (auto &it : NeighbVPKVec) {
-        // auto MapIt = HEdgeMap_.find(it);
-        // delete MapIt->second;
-        // HEdgeMap_.erase(MapIt);
-        HEdgeMap_.erase(it);
-        HEdgeMap_.erase(VertexPairKey(it.end, it.start));
+        auto MapIt = HEdgeMap_.find(it);
+        if (MapIt->second) delete MapIt->second;
+        HEdgeMap_.erase(MapIt);
+        MapIt = HEdgeMap_.find(VertexPairKey(it.end, it.start));
+        if (MapIt->second) delete MapIt->second;
+        HEdgeMap_.erase(MapIt);
+        // HEdgeMap_.erase(it);
+        // HEdgeMap_.erase(VertexPairKey(it.end, it.start));
     }
-    for (auto it : VPairHeap_) {
-        for (auto &VPKit : NeighbVPKVec) {
-            if ((it->v1 == VPKit.start && it->v2 == VPKit.end) || (it->v1 == VPKit.end && it->v2 == VPKit.start)) {
-                it->erased = true;
-            }
-        }
+    for (auto &VPKit : NeighbVPKVec) {
+        DelVPairSet_.insert(VPKit);
     }
+    // for (auto it : VPairHeap_) {
+    //     for (auto &VPKit : NeighbVPKVec) {
+    //         if ((it->v1 == VPKit.start && it->v2 == VPKit.end) || (it->v1 == VPKit.end && it->v2 == VPKit.start)) {
+    //             it->erased = true;
+    //         }
+    //     }
+    // }
 
     for (auto it : NeighbFaceVec) {
-        // delete it;
         FaceSet_.erase(it);
+        delete it;
     }
 
     for (auto it = NeighbVertexVec.begin() + 1; it != NeighbVertexVec.end(); ++it) {
@@ -330,7 +340,7 @@ void MyHEMesh::ContractVPair(VertexPair* vpair) {
     }
     VertexSet_.erase(vpair->v1); VertexSet_.erase(vpair->v2);
     VertexSet_.insert(v);
-    // delete vpair.v1; delete vpair.v2;
+    delete vpair->v1; delete vpair->v2;
 
     for (auto it : NeighbVertexVec) {
         UpdateQMatrix(*it);

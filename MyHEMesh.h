@@ -80,6 +80,7 @@ private:
     std::vector<Vertex*> VertexVec_;
     std::set<Vertex*> VertexSet_;
     std::vector<VertexPair*> VPairHeap_;
+    std::set<VertexPairKey> DelVPairSet_;
     Vertex* InsertrVertex(double x, double y, double z);
     Face* InsertFace(Vertex* v1, Vertex* v2, Vertex* v3);
     HEdge* InsertHEdge(Vertex* v1, Vertex* v2);
