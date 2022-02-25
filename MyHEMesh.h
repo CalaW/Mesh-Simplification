@@ -23,7 +23,7 @@ struct HEdge {
     HEdge* next = nullptr; //paired HEdge and next HEdge
     Vertex* v; //point at v
     Face* f; //left face
-    VertexPair* vpair;
+    bool isBound = false;
 };
 
 struct Face {
@@ -37,6 +37,7 @@ struct Vertex {
     Eigen::Matrix4d Q = Eigen::Matrix4d::Zero();
     int index; //works when output
     HEdge* h = nullptr;
+    bool isBound = false;
 };
 
 inline Eigen::Vector3d GetPosVec(const Vertex* v);
@@ -58,7 +59,6 @@ struct VertexPair {
     Vertex* v2;
     double cost = INFINITY;
     Eigen::Vector4d v;
-    bool erased = false;
     bool operator< (const VertexPair& other) const {
         return cost < other.cost;
     }
@@ -74,7 +74,6 @@ struct VPairPtrGreater {
 
 class MyHEMesh {
 private:
-    std::vector<HEdge*> HEdgeVec_;
     std::map<VertexPairKey, HEdge*> HEdgeMap_;
     std::set<Face*> FaceSet_;
     std::vector<Vertex*> VertexVec_;
@@ -84,8 +83,10 @@ private:
     Vertex* InsertrVertex(double x, double y, double z);
     Face* InsertFace(Vertex* v1, Vertex* v2, Vertex* v3);
     HEdge* InsertHEdge(Vertex* v1, Vertex* v2);
+    double BoundPenalty = 10;
     bool HasFoldFace(const VertexPair* vpair, const std::vector<Face*>& NeighbFaceVec);
     bool IsCollapseable(const std::vector<Vertex*>& VertexVec, const Vertex* v1, const Vertex* v2);
+    void CheckBound(Vertex* v);
 
 public:
     void ReadFromOBJ(const std::string& path);
@@ -100,6 +101,7 @@ public:
     void ContractLeastCostPair();
     void ContractVPair(VertexPair* vpair);
     void ContractInitModel(long v1index, long v2index);
+    long GetFaceNum() {return FaceSet_.size();}
 
     static Eigen::Vector4d CalcP(const Face* f);
 };

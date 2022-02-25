@@ -73,8 +73,6 @@ HEdge* MyHEMesh::InsertHEdge(Vertex* v1, Vertex* v2) {
         vpair->v1 = v1;
         vpair->v2 = v2;
         VPairHeap_.push_back(vpair);
-        h->vpair = vpair;
-        hpair->vpair = vpair;
     }
     else {
         h = search->second;
@@ -121,6 +119,9 @@ void MyHEMesh::ReadFromOBJ(const string& path) {
                 throw std::invalid_argument("Invalid flag at line " + to_string(line_num));
         }
     }
+    for (auto vptr : VertexVec_) {
+        CheckBound(vptr);
+    }
     UpdateAllQMatrix();
     UpdateAllVPairCost();
     MakeVPairHeap();
@@ -165,16 +166,40 @@ Eigen::Vector4d MyHEMesh::CalcP(const Face* f) {
 
 void MyHEMesh::UpdateQMatrix(Vertex& v) {
     v.Q = Matrix4d::Zero();
-    HEdge* h = v.h;
-    // std::cout << "Update QMatrix of "<< v.x << v.y << v.z << '\n';
-    do {
-        Face* f = h->f;
-        Vector4d p;
-        p = CalcP(f);
-        // std::cout << p.transpose() << '\n';
-        v.Q += p * p.transpose();
-        h = h->pair->next;
-    } while (h != v.h);
+    if (v.isBound) {
+        HEdge* h = v.h->pair->next;
+        HEdge* prev = v.h;
+        while (h != nullptr) {
+            Face* f = h->f;
+            Vector4d p;
+            p = CalcP(f);
+            // std::cout << p.transpose() << '\n';
+            v.Q += p * p.transpose();
+            h = h->pair->next;
+        }
+
+        Vector3d initEdgeVec = GetPosVec(v.h->pair->v) - GetPosVec(&v);
+        initEdgeVec.normalize();
+        Vector4d initEdgeP(initEdgeVec(0), initEdgeVec(1), initEdgeVec(2), 1);
+        v.Q += BoundPenalty * initEdgeP * initEdgeP.transpose();
+
+        Vector3d endEdgeVec = GetPosVec(prev->pair->v) - GetPosVec(&v);
+        endEdgeVec.normalize();
+        Vector4d endEdgeP(initEdgeVec(0), initEdgeVec(1), initEdgeVec(2), 1);
+        v.Q += BoundPenalty * endEdgeP * endEdgeP.transpose();
+    } else {
+        HEdge* h = v.h;
+        // std::cout << "Update QMatrix of "<< v.x << v.y << v.z << '\n';
+        do {
+            Face* f = h->f;
+            Vector4d p;
+            p = CalcP(f);
+            // std::cout << p.transpose() << '\n';
+            v.Q += p * p.transpose();
+            h = h->pair->next;
+        } while (h != v.h);
+    }
+
     // std::cout << std::endl;
 }
 
@@ -231,11 +256,12 @@ void MyHEMesh::ReaddVPair(double threshold) {
 void MyHEMesh::ContractModel(long facenum) {
     long PrevFaceSize = 0;
     while (FaceSet_.size() > facenum && VPairHeap_.size() > 0) {
-        if (FaceSet_.size() % 500 == 0 && FaceSet_.size() != PrevFaceSize) {
+        // if (FaceSet_.size() % 500 == 0 && FaceSet_.size() != PrevFaceSize) {
             std::cout << FaceSet_.size() << ' ' << VPairHeap_.size() << '\n';
             PrevFaceSize = FaceSet_.size();
-        }
-        if (FaceSet_.size() == 109588) SaveToOBJ("galera-debug.obj");
+        // }
+        if (FaceSet_.size() < 140)
+            SaveToOBJ("halsph-debug" + to_string(FaceSet_.size()) + ".obj");
         ContractLeastCostPair();
     }
 }
@@ -255,8 +281,8 @@ void MyHEMesh::ContractLeastCostPair() {
 }
 
 void MyHEMesh::ContractVPair(VertexPair* vpair) {
-    // std::cout << "Contract pair" << vpair->v1->x << ' ' << vpair->v1->y << ' ' << vpair->v1->z
-    //                     << " & " << vpair->v2->x << ' ' << vpair->v2->y << ' ' << vpair->v2->z << '\n';
+    std::cout << "Contract pair" << vpair->v1->x << ' ' << vpair->v1->y << ' ' << vpair->v1->z
+                        << " & " << vpair->v2->x << ' ' << vpair->v2->y << ' ' << vpair->v2->z;
 
     Vertex* v = new Vertex;
     v->x = vpair->v(0); v->y = vpair->v(1); v->z = vpair->v(2);
@@ -267,9 +293,21 @@ void MyHEMesh::ContractVPair(VertexPair* vpair) {
     vector<VertexPairKey> NeighbVPKVec;
     vector<Vertex*> NeighbVertexVec;
     vector<Face*> NeighbFaceVec;
-    Vertex* vstart = (vpair->v1->h->pair->v == vpair->v2) ? vpair->v2 : vpair->v1;
-    Vertex* vother = (vpair->v1->h->pair->v == vpair->v2) ? vpair->v1 : vpair->v2;
-    // HEdge* h = (vpair.v1->h->pair->v == vpair.v2) ? vpair.v2->h : vpair.v1->h;
+    Vertex* vstart;
+    Vertex* vother;
+    if (vpair->v1->isBound && vpair->v2->isBound) {
+        vstart = (vpair->v1->h->pair->v == vpair->v2) ? vpair->v2 : vpair->v1;
+        vother = (vpair->v1->h->pair->v == vpair->v2) ? vpair->v1 : vpair->v2;
+    } else if (vpair->v1->isBound) {
+        vstart = vpair->v1;
+        vother = vpair->v2;
+    } else if (vpair->v2->isBound) {
+        vstart = vpair->v2;
+        vother = vpair->v1;
+    } else {
+        vstart = vpair->v1;
+        vother = vpair->v2;
+    }
     HEdge* h = vstart->h;
     do {
         // std::cout << "Traverse edge" << h->v->x << ' ' << h->v->y << ' ' << h->v->z << " to "
@@ -279,17 +317,21 @@ void MyHEMesh::ContractVPair(VertexPair* vpair) {
             if (h->next == vstart->h) break;
             NeighbFaceVec.push_back(h->f);
             NeighbVPKVec.push_back(VertexPairKey(h->next->v, h->next->pair->v));
+            if (h->next->isBound) {
+                NeighbVertexVec.push_back(h->next->pair->v);
+                NeighbVPKVec.push_back(VertexPairKey(h->pair->v, h->next->pair->v));
+            }
             h = h->next->pair->next;
             continue;
         }
         NeighbVPKVec.push_back(VertexPairKey(h->v, h->pair->v));
         // NeighbVPKVec.push_back(VertexPairKey(h->pair->v, h->v));
         NeighbVertexVec.push_back(h->pair->v);
-        NeighbFaceVec.push_back(h->f);
+        if (h->f != nullptr) NeighbFaceVec.push_back(h->f);
         h = h->pair->next;
         // h = (h.v == vpair.v2 && h->pair->v == vpair.v1) || (h.v == vpair.v1 && h->pair->v == vpair.v2)
         //     ? h->next->pair : h->pair->next;
-    } while (h != vstart->h);
+    } while (h != vstart->h && h != nullptr);
     // } while (h != vstart->h && h != nullptr);
     // bool IsEdge = (h == nullptr) ? true : false;
     bool IsEdge = false;
@@ -313,19 +355,10 @@ void MyHEMesh::ContractVPair(VertexPair* vpair) {
         MapIt = HEdgeMap_.find(VertexPairKey(it.end, it.start));
         if (MapIt->second) delete MapIt->second;
         HEdgeMap_.erase(MapIt);
-        // HEdgeMap_.erase(it);
-        // HEdgeMap_.erase(VertexPairKey(it.end, it.start));
     }
     for (auto &VPKit : NeighbVPKVec) {
         DelVPairSet_.insert(VPKit);
     }
-    // for (auto it : VPairHeap_) {
-    //     for (auto &VPKit : NeighbVPKVec) {
-    //         if ((it->v1 == VPKit.start && it->v2 == VPKit.end) || (it->v1 == VPKit.end && it->v2 == VPKit.start)) {
-    //             it->erased = true;
-    //         }
-    //     }
-    // }
 
     for (auto it : NeighbFaceVec) {
         FaceSet_.erase(it);
@@ -349,7 +382,6 @@ void MyHEMesh::ContractVPair(VertexPair* vpair) {
 
     for (long i = NeighbVertexVec.size(); i > 0; --i) {
         UpdateVPairCost(*(VPairHeap_.end() - i));
-        // std::push_heap(VPairHeap_.begin(), VPairHeap_.end() - i + 1, std::greater<VertexPair>());
         std::push_heap(VPairHeap_.begin(), VPairHeap_.end() - i + 1, VPairPtrGreater());
         // for (auto it : VPairHeap_) {
         //     std::cout << it->cost << ' ';
@@ -361,6 +393,7 @@ void MyHEMesh::ContractVPair(VertexPair* vpair) {
 Vector3d GetNormalVec(Face* f) {
     return (GetPosVec(f->v[2]) - GetPosVec(f->v[1])).cross(GetPosVec(f->v[1]) - GetPosVec(f->v[0]));
 }
+
 bool MyHEMesh::HasFoldFace(const VertexPair* vpair, const std::vector<Face*>& NeighbFaceVec) {
     Vector3d newPos = vpair->v(seq(fix<0>, fix<2>));
     for (auto it = NeighbFaceVec.begin(); it != NeighbFaceVec.end(); ++it) {
@@ -397,18 +430,26 @@ bool MyHEMesh::IsCollapseable(const std::vector<Vertex*>& NeighbVertexVec, const
             if (h->pair->v == v1) v1v = h->pair;
             if (h->pair->v == v2) v2v = h->pair;
             h = h->pair->next;
-        } while (h != v->h);
+        } while (h != v->h && h != nullptr);
         if (v1v != nullptr && v2v != nullptr) {
-            h = v1->h;
+            h = (v1->isBound) ? v1->h : v2->h;
             do {
-                if (h->pair->v == v2) {
+                if (h->pair->v == v2 || h->pair->v == v1) {
                     v1v2 = h;
                     break;
                 }
                 h = h->pair->next;
-            } while (h != v->h);
-            if (v1v2->next->pair->v != v && v1v2->pair->next->pair->v != v) {
-                return false;
+            } while (h != v->h && h != nullptr);
+            if (v1v2->isBound) {
+                if (v1v2->next != nullptr && v1v2->next->pair->v != v) {
+                    return false;
+                } else if (v1v2->pair->next != nullptr && v1v2->pair->next->v != v) {
+                    return false;
+                }
+            } else {
+                if (v1v2->next->pair->v != v && v1v2->pair->next->pair->v != v) {
+                    return false;
+                }
             }
         }
     }
@@ -416,5 +457,96 @@ bool MyHEMesh::IsCollapseable(const std::vector<Vertex*>& NeighbVertexVec, const
 }
 
 void MyHEMesh::ContractInitModel(long v1index, long v2index) {
+    Vertex* v = new Vertex;
+    VertexPair vpair;
+    vpair.v1 = VertexVec_[v1index];
+    vpair.v2 = VertexVec_[v2index];
+    UpdateVPairCost(&vpair);
+    v->x = vpair.v(0); v->y = vpair.v(1); v->z = vpair.v(2);
 
+    vector<VertexPairKey> NeighbVPKVec;
+    vector<Vertex*> NeighbVertexVec;
+    vector<Face*> NeighbFaceVec;
+    Vertex* vstart = (vpair.v1->h->pair->v == vpair.v2) ? vpair.v2 : vpair.v1;
+    Vertex* vother = (vpair.v1->h->pair->v == vpair.v2) ? vpair.v1 : vpair.v2;
+    // HEdge* h = (vpair.v1->h->pair->v == vpair.v2) ? vpair.v2->h : vpair.v1->h;
+    HEdge* h = vstart->h;
+    do {
+        // std::cout << "Traverse edge" << h->v->x << ' ' << h->v->y << ' ' << h->v->z << " to "
+        //           << h->pair->v->x << ' ' << h->pair->v->y << ' ' << h->pair->v->z << std::endl;
+        if (h->pair->v == vother || h->pair->v == vstart) {
+            // if (h->next == vstart->h || h->next == nullptr) break;
+            if (h->next == vstart->h) break;
+            NeighbFaceVec.push_back(h->f);
+            NeighbVPKVec.push_back(VertexPairKey(h->next->v, h->next->pair->v));
+            h = h->next->pair->next;
+            continue;
+        }
+        NeighbVPKVec.push_back(VertexPairKey(h->v, h->pair->v));
+        // NeighbVPKVec.push_back(VertexPairKey(h->pair->v, h->v));
+        NeighbVertexVec.push_back(h->pair->v);
+        NeighbFaceVec.push_back(h->f);
+        h = h->pair->next;
+        // h = (h.v == vpair.v2 && h->pair->v == vpair.v1) || (h.v == vpair.v1 && h->pair->v == vpair.v2)
+        //     ? h->next->pair : h->pair->next;
+    } while (h != vstart->h);
+    // } while (h != vstart->h && h != nullptr);
+    // bool IsEdge = (h == nullptr) ? true : false;
+    bool IsEdge = false;
+
+    if (!IsCollapseable(NeighbVertexVec, vpair.v1, vpair.v2)) {
+        // std::cout << "find non-manifold" << std::endl;
+        return;
+    }
+
+    if (HasFoldFace(&vpair, NeighbFaceVec)) {
+        // std::cout << "find folded" << std::endl;
+        return;
+    }
+
+    for (auto it : NeighbFaceVec) {
+        FaceSet_.erase(it);
+        delete it;
+    }
+
+    for (auto it = NeighbVertexVec.begin() + 1; it != NeighbVertexVec.end(); ++it) {
+        InsertFace(v, *it, *(it - 1));
+    }
+    if (!IsEdge) {
+        InsertFace(v, NeighbVertexVec.front(), NeighbVertexVec.back());
+    }
+
+    for (auto vptr : NeighbVertexVec) {
+        CheckBound(vptr);
+    }
+    CheckBound(v);
+    VertexSet_.erase(vpair.v1); VertexSet_.erase(vpair.v2);
+    VertexSet_.insert(v);
+    delete vpair.v1; delete vpair.v2;
+}
+
+void MyHEMesh::CheckBound(Vertex* v) {
+    HEdge* h = v->h;
+    HEdge* prev;
+    do {
+        prev = h;
+        h = h->pair->next;
+    } while(h != v->h && h != nullptr);
+
+    if (h == nullptr) {
+        v->isBound = true;
+        prev->isBound = true;
+        prev->pair->isBound = true;
+        prev = v->h;
+        h = v->h->next;
+        while (h->next)
+        // while (h != nullptr) {
+        //     h = h->next->pair;
+        //     prev = h;
+        //     h = h->next;
+        // }
+        prev->isBound = true;
+        prev->pair->isBound = true;
+        v->h = prev;
+    }
 }
